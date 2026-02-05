@@ -272,7 +272,7 @@ mod native {
                     lod_state.bulks.insert(path, bulk);
                 }
                 Err(e) => {
-                    tracing::warn!("LOD: Failed to load bulk '{}': {}", path, e);
+                    tracing::debug!("LOD: Failed to load bulk '{}': {}", path, e);
                     lod_state.failed_bulks.insert(path);
                 }
             }
@@ -613,6 +613,7 @@ fn update_frustum(
         ),
         With<Camera3d>,
     >,
+    windows: Query<&Window>,
 ) {
     let Ok((transform, projection, floating_camera)) = camera_query.single() else {
         return;
@@ -654,7 +655,10 @@ fn update_frustum(
     lod_state.frustum = Some(Frustum::from_matrix(vp));
 
     // Update LOD metrics using high-precision camera position.
-    let screen_height = 720.0;
+    let screen_height = windows
+        .single()
+        .ok()
+        .map_or(720.0, |w| f64::from(w.physical_height()));
     lod_state.lod_metrics = Some(LodMetrics::new(
         camera_pos_d,
         f64::from(perspective.fov),
