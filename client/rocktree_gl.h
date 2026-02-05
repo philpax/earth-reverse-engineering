@@ -1,5 +1,10 @@
 #include <SDL_opengl.h>
 
+// S3TC DXT1 extension constant (not always defined in GLES2/glad headers)
+#ifndef GL_COMPRESSED_RGB_S3TC_DXT1_EXT
+#define GL_COMPRESSED_RGB_S3TC_DXT1_EXT 0x83F0
+#endif
+
 struct gl_ctx_t {
 	GLuint program;
 	GLint transform_loc;
