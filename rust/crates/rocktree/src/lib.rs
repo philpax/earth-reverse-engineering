@@ -25,9 +25,11 @@
 //! let bulk = client.fetch_bulk(BulkRequest::root(planetoid.root_epoch)).await?;
 //! ```
 
+pub mod cache;
 mod error;
 pub mod types;
 
+pub use cache::{Cache, MemoryCache, NoCache};
 pub use error::{Error, Result};
 pub use types::{
     BulkMetadata, BulkRequest, Frustum, LodMetrics, Mesh, Node, NodeMetadata, NodeRequest,
