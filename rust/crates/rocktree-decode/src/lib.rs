@@ -31,7 +31,7 @@ pub mod texcoords;
 pub mod vertices;
 
 pub use error::{DecodeError, DecodeResult};
-pub use indices::unpack_indices;
+pub use indices::{strip_to_triangles, unpack_indices};
 pub use normals::{unpack_for_normals, unpack_normals};
 pub use obb::unpack_obb;
 pub use octants::unpack_octant_mask_and_layer_bounds;
@@ -61,6 +61,31 @@ pub struct Vertex {
 }
 
 const _: () = assert!(std::mem::size_of::<Vertex>() == 8);
+
+// SAFETY: The unsafe code in this impl is required for reading potentially
+// unaligned u16 fields from the packed struct. The reads are safe because:
+// 1. The pointers are derived from valid struct fields
+// 2. read_unaligned handles any alignment issues
+#[allow(unsafe_code)]
+impl Vertex {
+    /// Read the `u` texture coordinate (safe for packed struct).
+    #[must_use]
+    pub fn u(&self) -> u16 {
+        // Safe read from potentially unaligned field.
+        let ptr = std::ptr::addr_of!(self.u);
+        // SAFETY: ptr points to a valid u16 within the struct.
+        unsafe { ptr.read_unaligned() }
+    }
+
+    /// Read the `v` texture coordinate (safe for packed struct).
+    #[must_use]
+    pub fn v(&self) -> u16 {
+        // Safe read from potentially unaligned field.
+        let ptr = std::ptr::addr_of!(self.v);
+        // SAFETY: ptr points to a valid u16 within the struct.
+        unsafe { ptr.read_unaligned() }
+    }
+}
 
 /// UV offset and scale for texture coordinate mapping.
 #[derive(Debug, Clone, Copy, Default)]
