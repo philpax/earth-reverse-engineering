@@ -162,6 +162,45 @@ impl<C: Cache> Client<C> {
     }
 
     /// Fetch raw bytes from a URL, using cache if available.
+    ///
+    /// This is exposed for test vector generation - it allows saving raw
+    /// protobuf responses to disk.
+    pub async fn fetch_bytes_from_url(&self, url: &str) -> Result<Vec<u8>> {
+        self.fetch_bytes(url).await
+    }
+
+    /// Build the URL for fetching bulk metadata.
+    #[must_use]
+    pub fn bulk_url(&self, request: &BulkRequest) -> String {
+        format!(
+            "{}BulkMetadata/pb=!1m2!1s{}!2u{}",
+            self.base_url, request.path, request.epoch
+        )
+    }
+
+    /// Build the URL for fetching node data.
+    #[must_use]
+    pub fn node_url(&self, request: &NodeRequest) -> String {
+        if let Some(imagery_epoch) = request.imagery_epoch {
+            format!(
+                "{}NodeData/pb=!1m2!1s{}!2u{}!2e{}!3u{}!4b0",
+                self.base_url, request.path, request.epoch, request.texture_format, imagery_epoch
+            )
+        } else {
+            format!(
+                "{}NodeData/pb=!1m2!1s{}!2u{}!2e{}!4b0",
+                self.base_url, request.path, request.epoch, request.texture_format
+            )
+        }
+    }
+
+    /// Build the URL for fetching planetoid metadata.
+    #[must_use]
+    pub fn planetoid_url(&self) -> String {
+        format!("{}PlanetoidMetadata", self.base_url)
+    }
+
+    /// Fetch raw bytes from a URL, using cache if available.
     async fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>> {
         // Check cache first.
         if let Some(data) = self.cache.get(url).await? {
