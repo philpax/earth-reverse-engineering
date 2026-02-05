@@ -28,7 +28,7 @@ impl Plugin for DataLoaderPlugin {
 #[derive(Resource)]
 pub struct LoaderState {
     /// The HTTP client for fetching data.
-    client: Arc<Client<MemoryCache>>,
+    pub client: Arc<Client<MemoryCache>>,
     /// Planetoid metadata (once loaded).
     pub planetoid: Option<Planetoid>,
     /// Root bulk metadata (once loaded).
