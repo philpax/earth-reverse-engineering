@@ -153,17 +153,25 @@ mod native {
         for bulk_path in bulk_paths {
             let bulk = lod_state.bulks.get(&bulk_path).unwrap().clone();
 
+            // Collect frustum-visible node relative paths for child bulk filtering.
+            let mut visible_relative_paths: Vec<String> = Vec::new();
+
             // Check each node in this bulk.
             for node_meta in &bulk.nodes {
+                if !frustum.intersects_obb(&node_meta.obb) {
+                    continue;
+                }
+
+                // Track this node's relative path for child bulk filtering.
+                let relative_path = &node_meta.path[bulk_path.len()..];
+                visible_relative_paths.push(relative_path.to_string());
+
                 if !node_meta.has_data {
                     continue;
                 }
                 if lod_state.loaded_nodes.contains(&node_meta.path)
                     || lod_state.loading_nodes.contains(&node_meta.path)
                 {
-                    continue;
-                }
-                if !frustum.intersects_obb(&node_meta.obb) {
                     continue;
                 }
                 let node_center = node_meta.obb.center;
@@ -174,7 +182,9 @@ mod native {
                 nodes_to_load.push((node_meta.clone(), bulk_path.clone()));
             }
 
-            // Check if we should load child bulks.
+            // Only load child bulks that overlap with frustum-visible nodes.
+            // A child bulk at relative path "2152" is needed when a visible node
+            // at "2", "21", "215", or "2152" exists (or a deeper node like "21524").
             for child_path in &bulk.child_bulk_paths {
                 let full_path = format!("{bulk_path}{child_path}");
                 if lod_state.bulks.contains_key(&full_path)
@@ -183,7 +193,15 @@ mod native {
                 {
                     continue;
                 }
-                bulks_to_load.push((full_path, bulk.epoch));
+
+                let should_load = visible_relative_paths.iter().any(|vis_path| {
+                    child_path.starts_with(vis_path.as_str())
+                        || vis_path.starts_with(child_path.as_str())
+                });
+
+                if should_load {
+                    bulks_to_load.push((full_path, bulk.epoch));
+                }
             }
         }
 
@@ -392,16 +410,23 @@ mod wasm {
         for bulk_path in bulk_paths {
             let bulk = lod_state.bulks.get(&bulk_path).unwrap().clone();
 
+            // Collect frustum-visible node relative paths for child bulk filtering.
+            let mut visible_relative_paths: Vec<String> = Vec::new();
+
             for node_meta in &bulk.nodes {
+                if !frustum.intersects_obb(&node_meta.obb) {
+                    continue;
+                }
+
+                let relative_path = &node_meta.path[bulk_path.len()..];
+                visible_relative_paths.push(relative_path.to_string());
+
                 if !node_meta.has_data {
                     continue;
                 }
                 if lod_state.loaded_nodes.contains(&node_meta.path)
                     || lod_state.loading_nodes.contains(&node_meta.path)
                 {
-                    continue;
-                }
-                if !frustum.intersects_obb(&node_meta.obb) {
                     continue;
                 }
                 let node_center = node_meta.obb.center;
@@ -420,7 +445,15 @@ mod wasm {
                 {
                     continue;
                 }
-                bulks_to_load.push((full_path, bulk.epoch));
+
+                let should_load = visible_relative_paths.iter().any(|vis_path| {
+                    child_path.starts_with(vis_path.as_str())
+                        || vis_path.starts_with(child_path.as_str())
+                });
+
+                if should_load {
+                    bulks_to_load.push((full_path, bulk.epoch));
+                }
             }
         }
 
