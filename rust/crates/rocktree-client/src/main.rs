@@ -4,17 +4,19 @@
 //! 3D terrain data, with LOD-based loading and frustum culling.
 
 mod camera;
+mod loader;
 mod mesh;
 
 use bevy::prelude::*;
 use camera::{CameraControllerPlugin, FlightCamera};
+use loader::DataLoaderPlugin;
 
 /// Plugin for the main application.
 pub struct AppPlugin;
 
 impl Plugin for AppPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CameraControllerPlugin)
+        app.add_plugins((CameraControllerPlugin, DataLoaderPlugin))
             .add_systems(Startup, setup_scene);
     }
 }

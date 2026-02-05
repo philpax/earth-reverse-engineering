@@ -3,9 +3,6 @@
 //! Converts rocktree mesh data (packed vertices, triangle strips) to Bevy's
 //! mesh format (positions, normals, UVs, triangle lists).
 
-// These functions will be used in later commits.
-#![allow(dead_code)]
-
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -199,8 +196,10 @@ pub fn matrix_to_transform(matrix: &glam::DMat4) -> Transform {
 #[derive(Component)]
 pub struct RocktreeMeshMarker {
     /// The octant path for this node.
+    #[allow(dead_code)]
     pub path: String,
     /// Meters per texel (LOD metric).
+    #[allow(dead_code)]
     pub meters_per_texel: f32,
 }
 
