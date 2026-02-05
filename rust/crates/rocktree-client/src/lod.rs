@@ -93,6 +93,7 @@ mod native {
     use crate::mesh::{
         RocktreeMeshMarker, convert_mesh, convert_texture, matrix_to_world_position_and_transform,
     };
+    use crate::unlit_material::UnlitMaterial;
 
     /// Channels for receiving loaded data from background tasks.
     #[derive(Resource)]
@@ -295,7 +296,7 @@ mod native {
         mut commands: Commands,
         mut lod_state: ResMut<LodState>,
         mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<StandardMaterial>>,
+        mut materials: ResMut<Assets<UnlitMaterial>>,
         mut images: ResMut<Assets<Image>>,
         mut channels: ResMut<LodChannels>,
     ) {
@@ -328,11 +329,8 @@ mod native {
                         let mesh_handle = meshes.add(mesh);
                         let texture_handle = images.add(texture);
 
-                        let material = materials.add(StandardMaterial {
-                            base_color_texture: Some(texture_handle),
-                            unlit: true,
-                            cull_mode: None,
-                            ..Default::default()
+                        let material = materials.add(UnlitMaterial {
+                            base_color_texture: texture_handle,
                         });
 
                         let (world_position, transform) =
@@ -343,8 +341,6 @@ mod native {
                             MeshMaterial3d(material),
                             transform,
                             world_position,
-                            bevy::light::NotShadowCaster,
-                            bevy::light::NotShadowReceiver,
                             RocktreeMeshMarker {
                                 path: node.path.clone(),
                                 meters_per_texel: node.meters_per_texel,
@@ -378,6 +374,7 @@ mod wasm {
     use crate::mesh::{
         RocktreeMeshMarker, convert_mesh, convert_texture, matrix_to_world_position_and_transform,
     };
+    use crate::unlit_material::UnlitMaterial;
 
     /// Component for tracking async bulk load tasks for LOD.
     #[derive(Component)]
@@ -564,7 +561,7 @@ mod wasm {
         mut commands: Commands,
         mut lod_state: ResMut<LodState>,
         mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<StandardMaterial>>,
+        mut materials: ResMut<Assets<UnlitMaterial>>,
         mut images: ResMut<Assets<Image>>,
         mut query: Query<(Entity, &mut LodNodeTask)>,
     ) {
@@ -598,11 +595,8 @@ mod wasm {
                             let mesh_handle = meshes.add(mesh);
                             let texture_handle = images.add(texture);
 
-                            let material = materials.add(StandardMaterial {
-                                base_color_texture: Some(texture_handle),
-                                unlit: true,
-                                cull_mode: None,
-                                ..Default::default()
+                            let material = materials.add(UnlitMaterial {
+                                base_color_texture: texture_handle,
                             });
 
                             let (world_position, transform) =
@@ -701,22 +695,50 @@ fn update_frustum(
     ));
 }
 
-/// Cull meshes whose node OBB is outside the view frustum.
+/// Cull meshes based on frustum visibility and parent/child overlap.
 ///
-/// Uses the real OBB from bulk metadata (stored on each mesh entity) rather
-/// than computing a bounding box from vertex data.
+/// Uses the real OBB from bulk metadata (stored on each mesh entity) for
+/// frustum culling. Also hides parent nodes that are fully covered by loaded
+/// children (all 8 octants present) to prevent coarse geometry overlapping
+/// fine geometry.
 #[allow(clippy::needless_pass_by_value)]
 fn cull_meshes(lod_state: Res<LodState>, mut query: Query<(&RocktreeMeshMarker, &mut Visibility)>) {
     let Some(frustum) = lod_state.frustum else {
         return;
     };
 
+    // Build octant masks: for each loaded node, track which of its children
+    // are also loaded. When all 8 children are present (mask == 0xff), the
+    // parent is fully covered and should be hidden.
+    let mut octant_masks: HashMap<&str, u8> = HashMap::new();
+    for path in &lod_state.loaded_nodes {
+        if !path.is_empty() {
+            let parent = &path[..path.len() - 1];
+            let octant = path.as_bytes()[path.len() - 1] - b'0';
+            if octant < 8 {
+                *octant_masks.entry(parent).or_default() |= 1 << octant;
+            }
+        }
+    }
+
     for (marker, mut visibility) in &mut query {
-        let visible = frustum.intersects_obb(&marker.obb);
-        let desired = if visible {
-            Visibility::Inherited
-        } else {
+        // Check frustum visibility.
+        if !frustum.intersects_obb(&marker.obb) {
+            if *visibility != Visibility::Hidden {
+                *visibility = Visibility::Hidden;
+            }
+            continue;
+        }
+
+        // Hide parent nodes that are fully covered by children.
+        let fully_masked = octant_masks
+            .get(marker.path.as_str())
+            .is_some_and(|&mask| mask == 0xff);
+
+        let desired = if fully_masked {
             Visibility::Hidden
+        } else {
+            Visibility::Inherited
         };
         if *visibility != desired {
             *visibility = desired;

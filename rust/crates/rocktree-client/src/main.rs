@@ -9,6 +9,7 @@ mod loader;
 mod lod;
 mod mesh;
 mod ui;
+mod unlit_material;
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -18,6 +19,7 @@ use glam::DVec3;
 use loader::DataLoaderPlugin;
 use lod::LodPlugin;
 use ui::DebugUiPlugin;
+use unlit_material::UnlitMaterialPlugin;
 
 /// Plugin for the main application.
 pub struct AppPlugin;
@@ -30,6 +32,7 @@ impl Plugin for AppPlugin {
             DataLoaderPlugin,
             LodPlugin,
             DebugUiPlugin,
+            UnlitMaterialPlugin,
         ))
         .add_systems(Startup, setup_scene);
     }
