@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
-use glam::{DMat4, DVec3};
+use glam::DMat4;
 use rocktree::{BulkMetadata, Frustum, LodMetrics};
 
 use crate::mesh::RocktreeMeshMarker;
@@ -295,6 +295,7 @@ mod native {
                         let material = materials.add(StandardMaterial {
                             base_color_texture: Some(texture_handle),
                             unlit: true,
+                            cull_mode: None,
                             ..Default::default()
                         });
 
@@ -532,6 +533,7 @@ mod wasm {
                             let material = materials.add(StandardMaterial {
                                 base_color_texture: Some(texture_handle),
                                 unlit: true,
+                                cull_mode: None,
                                 ..Default::default()
                             });
 
@@ -628,36 +630,21 @@ fn update_frustum(
 }
 
 /// Cull meshes outside the frustum.
+///
+/// TODO: Store actual node OBBs per mesh entity for proper culling.
+/// Currently disabled because the approximate bounding box is too small.
 #[allow(clippy::needless_pass_by_value)]
 fn cull_meshes(
-    lod_state: Res<LodState>,
-    mut query: Query<(
+    _lod_state: Res<LodState>,
+    _query: Query<(
         &crate::floating_origin::WorldPosition,
         &mut Visibility,
         &RocktreeMeshMarker,
     )>,
 ) {
-    let Some(ref frustum) = lod_state.frustum else {
-        return;
-    };
-
-    for (world_pos, mut visibility, _marker) in &mut query {
-        // Use world position for culling since frustum is in world space.
-        let center = world_pos.position;
-
-        // Approximate with a point + small radius.
-        let obb = rocktree::OrientedBoundingBox {
-            center,
-            extents: DVec3::splat(1000.0), // 1km bounding box.
-            orientation: glam::DMat3::IDENTITY,
-        };
-
-        *visibility = if frustum.intersects_obb(&obb) {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-    }
+    // Culling disabled: we don't have the correct OBB per mesh entity yet.
+    // The mesh geometry spans millions of meters (0-255 vertices * scale),
+    // so a small approximate bounding box incorrectly hides everything.
 }
 
 // =============================================================================

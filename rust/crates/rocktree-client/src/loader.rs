@@ -77,6 +77,7 @@ mod native {
     }
 
     /// Background task that loads planetoid, bulk, and node data.
+    #[allow(clippy::too_many_lines)]
     async fn load_planetoid_and_data(mut ctx: TaskContext, client: Arc<Client<MemoryCache>>) {
         // Fetch planetoid metadata.
         let planetoid = match client.fetch_planetoid().await {
@@ -172,6 +173,7 @@ mod native {
                                 let material = materials.add(StandardMaterial {
                                     base_color_texture: Some(texture_handle),
                                     unlit: true,
+                                    cull_mode: None,
                                     ..Default::default()
                                 });
 
