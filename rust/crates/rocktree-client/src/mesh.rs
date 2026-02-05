@@ -211,6 +211,8 @@ pub struct RocktreeMeshMarker {
     /// Meters per texel (LOD metric).
     #[allow(dead_code)]
     pub meters_per_texel: f32,
+    /// Oriented bounding box from the node's bulk metadata.
+    pub obb: rocktree_decode::OrientedBoundingBox,
 }
 
 #[cfg(test)]

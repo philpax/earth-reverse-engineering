@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use glam::DMat4;
 use rocktree::{BulkMetadata, Frustum, LodMetrics};
+use rocktree_decode::OrientedBoundingBox;
 
 use crate::mesh::RocktreeMeshMarker;
 
@@ -52,6 +53,8 @@ pub struct LodState {
     failed_bulks: HashSet<String>,
     /// Cached bulk metadata by path.
     bulks: HashMap<String, BulkMetadata>,
+    /// Node OBBs from bulk metadata, keyed by node path.
+    node_obbs: HashMap<String, OrientedBoundingBox>,
     /// Current view frustum (updated each frame).
     frustum: Option<Frustum>,
     /// Current LOD metrics (updated each frame).
@@ -153,8 +156,9 @@ mod native {
         for bulk_path in bulk_paths {
             let bulk = lod_state.bulks.get(&bulk_path).unwrap().clone();
 
-            // Collect frustum-visible node relative paths for child bulk filtering.
-            let mut visible_relative_paths: Vec<String> = Vec::new();
+            // Collect relative paths of frustum-visible nodes that need refinement
+            // (for child bulk filtering).
+            let mut refinable_relative_paths: Vec<String> = Vec::new();
 
             // Check each node in this bulk.
             for node_meta in &bulk.nodes {
@@ -162,10 +166,20 @@ mod native {
                     continue;
                 }
 
-                // Track this node's relative path for child bulk filtering.
-                let relative_path = &node_meta.path[bulk_path.len()..];
-                visible_relative_paths.push(relative_path.to_string());
+                // Cache the OBB from bulk metadata for use when spawning mesh entities.
+                lod_state
+                    .node_obbs
+                    .entry(node_meta.path.clone())
+                    .or_insert(node_meta.obb);
 
+                // Track nodes that need refinement for child bulk loading.
+                let node_center = node_meta.obb.center;
+                if lod_metrics.should_refine(node_center, node_meta.meters_per_texel) {
+                    let relative_path = &node_meta.path[bulk_path.len()..];
+                    refinable_relative_paths.push(relative_path.to_string());
+                }
+
+                // Load all frustum-visible nodes with data.
                 if !node_meta.has_data {
                     continue;
                 }
@@ -174,16 +188,12 @@ mod native {
                 {
                     continue;
                 }
-                let node_center = node_meta.obb.center;
-                if !lod_metrics.should_refine(node_center, node_meta.meters_per_texel) {
-                    continue;
-                }
 
                 nodes_to_load.push((node_meta.clone(), bulk_path.clone()));
             }
 
-            // Only load child bulks that overlap with frustum-visible nodes.
-            // A child bulk at relative path "2152" is needed when a visible node
+            // Only load child bulks that overlap with nodes needing refinement.
+            // A child bulk at relative path "2152" is needed when a refinable node
             // at "2", "21", "215", or "2152" exists (or a deeper node like "21524").
             for child_path in &bulk.child_bulk_paths {
                 let full_path = format!("{bulk_path}{child_path}");
@@ -194,7 +204,7 @@ mod native {
                     continue;
                 }
 
-                let should_load = visible_relative_paths.iter().any(|vis_path| {
+                let should_load = refinable_relative_paths.iter().any(|vis_path| {
                     child_path.starts_with(vis_path.as_str())
                         || vis_path.starts_with(child_path.as_str())
                 });
@@ -300,6 +310,13 @@ mod native {
                         node.meshes.len()
                     );
 
+                    // Look up the real OBB from bulk metadata.
+                    let obb = lod_state
+                        .node_obbs
+                        .get(&node.path)
+                        .copied()
+                        .unwrap_or(node.obb);
+
                     lod_state.loaded_nodes.insert(path);
 
                     // Spawn mesh entities.
@@ -328,8 +345,8 @@ mod native {
                             RocktreeMeshMarker {
                                 path: node.path.clone(),
                                 meters_per_texel: node.meters_per_texel,
+                                obb,
                             },
-                            Visibility::Inherited,
                         ));
                     }
                 }
@@ -410,17 +427,28 @@ mod wasm {
         for bulk_path in bulk_paths {
             let bulk = lod_state.bulks.get(&bulk_path).unwrap().clone();
 
-            // Collect frustum-visible node relative paths for child bulk filtering.
-            let mut visible_relative_paths: Vec<String> = Vec::new();
+            // Collect relative paths of frustum-visible nodes that need refinement.
+            let mut refinable_relative_paths: Vec<String> = Vec::new();
 
             for node_meta in &bulk.nodes {
                 if !frustum.intersects_obb(&node_meta.obb) {
                     continue;
                 }
 
-                let relative_path = &node_meta.path[bulk_path.len()..];
-                visible_relative_paths.push(relative_path.to_string());
+                // Cache the OBB from bulk metadata.
+                lod_state
+                    .node_obbs
+                    .entry(node_meta.path.clone())
+                    .or_insert(node_meta.obb);
 
+                // Track nodes that need refinement for child bulk loading.
+                let node_center = node_meta.obb.center;
+                if lod_metrics.should_refine(node_center, node_meta.meters_per_texel) {
+                    let relative_path = &node_meta.path[bulk_path.len()..];
+                    refinable_relative_paths.push(relative_path.to_string());
+                }
+
+                // Load all frustum-visible nodes with data.
                 if !node_meta.has_data {
                     continue;
                 }
@@ -429,14 +457,11 @@ mod wasm {
                 {
                     continue;
                 }
-                let node_center = node_meta.obb.center;
-                if !lod_metrics.should_refine(node_center, node_meta.meters_per_texel) {
-                    continue;
-                }
 
                 nodes_to_load.push((node_meta.clone(), bulk_path.clone()));
             }
 
+            // Only load child bulks that overlap with nodes needing refinement.
             for child_path in &bulk.child_bulk_paths {
                 let full_path = format!("{bulk_path}{child_path}");
                 if lod_state.bulks.contains_key(&full_path)
@@ -446,7 +471,7 @@ mod wasm {
                     continue;
                 }
 
-                let should_load = visible_relative_paths.iter().any(|vis_path| {
+                let should_load = refinable_relative_paths.iter().any(|vis_path| {
                     child_path.starts_with(vis_path.as_str())
                         || vis_path.starts_with(child_path.as_str())
                 });
@@ -522,7 +547,7 @@ mod wasm {
                         lod_state.bulks.insert(path, bulk);
                     }
                     Err(e) => {
-                        tracing::warn!("LOD: Failed to load bulk '{}': {}", path, e);
+                        tracing::debug!("LOD: Failed to load bulk '{}': {}", path, e);
                         lod_state.failed_bulks.insert(path);
                     }
                 }
@@ -554,6 +579,13 @@ mod wasm {
                             node.meshes.len()
                         );
 
+                        // Look up the real OBB from bulk metadata.
+                        let obb = lod_state
+                            .node_obbs
+                            .get(&node.path)
+                            .copied()
+                            .unwrap_or(node.obb);
+
                         lod_state.loaded_nodes.insert(path);
 
                         for rocktree_mesh in &node.meshes {
@@ -583,8 +615,8 @@ mod wasm {
                                 RocktreeMeshMarker {
                                     path: node.path.clone(),
                                     meters_per_texel: node.meters_per_texel,
+                                    obb,
                                 },
-                                Visibility::Inherited,
                             ));
                         }
                     }
@@ -666,22 +698,27 @@ fn update_frustum(
     ));
 }
 
-/// Cull meshes outside the frustum.
+/// Cull meshes whose node OBB is outside the view frustum.
 ///
-/// TODO: Store actual node OBBs per mesh entity for proper culling.
-/// Currently disabled because the approximate bounding box is too small.
+/// Uses the real OBB from bulk metadata (stored on each mesh entity) rather
+/// than computing a bounding box from vertex data.
 #[allow(clippy::needless_pass_by_value)]
-fn cull_meshes(
-    _lod_state: Res<LodState>,
-    _query: Query<(
-        &crate::floating_origin::WorldPosition,
-        &mut Visibility,
-        &RocktreeMeshMarker,
-    )>,
-) {
-    // Culling disabled: we don't have the correct OBB per mesh entity yet.
-    // The mesh geometry spans millions of meters (0-255 vertices * scale),
-    // so a small approximate bounding box incorrectly hides everything.
+fn cull_meshes(lod_state: Res<LodState>, mut query: Query<(&RocktreeMeshMarker, &mut Visibility)>) {
+    let Some(frustum) = lod_state.frustum else {
+        return;
+    };
+
+    for (marker, mut visibility) in &mut query {
+        let visible = frustum.intersects_obb(&marker.obb);
+        let desired = if visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != desired {
+            *visibility = desired;
+        }
+    }
 }
 
 // =============================================================================
