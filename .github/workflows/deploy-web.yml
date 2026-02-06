@@ -40,12 +40,10 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-deploy-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.108 --locked
 
       - name: Install wasm-opt
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y binaryen
+        run: cargo install wasm-opt --locked
 
       - name: Build
         run: ./scripts/web_build.sh

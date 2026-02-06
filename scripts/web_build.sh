@@ -3,7 +3,7 @@ set -e
 cargo build --release -p rocktree-client --target wasm32-unknown-unknown --no-default-features --features webgpu
 wasm-bindgen \
     --no-typescript \
-    --target web  \
+    --target web \
     --out-dir ./build/ \
     --out-name "rocktree_client" \
     ./target/wasm32-unknown-unknown/release/rocktree-client.wasm
