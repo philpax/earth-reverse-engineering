@@ -89,7 +89,16 @@ fn grab_cursor(
 /// Set cursor grab state, centering the cursor when grabbing.
 fn set_cursor_grab(cursor: &mut CursorOptions, window: &mut Window, grabbed: bool) {
     if grabbed {
-        cursor.grab_mode = CursorGrabMode::Locked;
+        // Native: Use Locked mode for true mouse capture.
+        // WASM: Use Confined mode (Locked not supported in browsers).
+        #[cfg(not(target_family = "wasm"))]
+        {
+            cursor.grab_mode = CursorGrabMode::Locked;
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            cursor.grab_mode = CursorGrabMode::Confined;
+        }
         cursor.visible = false;
         // Center the cursor in the window.
         let center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
@@ -100,10 +109,13 @@ fn set_cursor_grab(cursor: &mut CursorOptions, window: &mut Window, grabbed: boo
     }
 }
 
-/// Check if cursor is currently grabbed.
+/// Check if cursor is currently grabbed (Locked on native, Confined on WASM).
 #[allow(clippy::needless_pass_by_value)]
 fn cursor_is_grabbed(cursor: Single<&CursorOptions>) -> bool {
-    cursor.grab_mode == CursorGrabMode::Locked
+    matches!(
+        cursor.grab_mode,
+        CursorGrabMode::Locked | CursorGrabMode::Confined
+    )
 }
 
 /// Handle cursor grab/ungrab with ESC and left-click.
@@ -115,7 +127,10 @@ fn cursor_grab_system(
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     mut contexts: EguiContexts,
 ) {
-    let is_grabbed = cursor.grab_mode == CursorGrabMode::Locked;
+    let is_grabbed = matches!(
+        cursor.grab_mode,
+        CursorGrabMode::Locked | CursorGrabMode::Confined
+    );
 
     // ESC to release cursor.
     if keyboard.just_pressed(KeyCode::Escape) && is_grabbed {

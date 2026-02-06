@@ -92,7 +92,35 @@ Within each module, organize code as follows:
 - Careful attention to cloning referencing. Avoid cloning if code has a natural tree structure.
 - Stream data (e.g. iterators) where possible rather than buffering.
 
-## Testing 
+## Building
+
+### Native build
+
+```sh
+cargo run -p rocktree-client
+```
+
+### Web/WASM build
+
+Prerequisites:
+- Rust with the `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
+- `wasm-bindgen-cli`: `cargo install wasm-bindgen-cli`
+- (Optional) `wasm-opt` from [binaryen](https://github.com/WebAssembly/binaryen) for size optimization
+
+Development (uses `wasm-server-runner` for hot reload):
+```sh
+cargo install wasm-server-runner
+./scripts/web_dev.sh
+```
+
+Production build:
+```sh
+./scripts/web_build.sh
+# Output is in ./build/
+# Serve with: cd build && python -m http.server 8080
+```
+
+## Testing
 
 ### Testing tools
 

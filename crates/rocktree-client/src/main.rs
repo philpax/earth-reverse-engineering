@@ -91,14 +91,31 @@ fn main() {
             .init();
     }
 
+    // Initialize tracing for WASM (logs to browser console).
+    #[cfg(target_family = "wasm")]
+    {
+        console_error_panic_hook::set_once();
+        tracing_wasm::set_as_global_default();
+    }
+
     let mut app = App::new();
 
+    #[allow(unused_mut)]
+    let mut window = Window {
+        title: "rocktree-client".to_string(),
+        resolution: (1280, 720).into(),
+        ..Default::default()
+    };
+
+    // WASM: Fit canvas to parent element and prevent browser event handling.
+    #[cfg(target_family = "wasm")]
+    {
+        window.fit_canvas_to_parent = true;
+        window.prevent_default_event_handling = true;
+    }
+
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "rocktree-client".to_string(),
-            resolution: (1280, 720).into(),
-            ..Default::default()
-        }),
+        primary_window: Some(window),
         ..Default::default()
     }));
 

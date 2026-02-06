@@ -6,19 +6,39 @@ license.workspace = true
 repository.workspace = true
 description = "3D viewer for Google Earth mesh data using Bevy"
 
+[features]
+default = []
+webgpu = ["bevy/webgpu"]
+
 [dependencies]
 rocktree = { path = "../rocktree" }
 rocktree-decode = { path = "../rocktree-decode" }
 glam = "0.30"
 tracing = "0.1"
-bevy = { version = "0.18.0", default-features = false, features = ["bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_winit", "bevy_window", "bevy_asset", "bevy_mesh", "multi_threaded", "x11"] }
+# Base Bevy features that work on both native and WASM.
+bevy = { version = "0.18.0", default-features = false, features = [
+    "bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_winit",
+    "bevy_window", "bevy_asset", "bevy_mesh", "webgl2"
+] }
 bevy_egui = "0.39"
+# Platform-agnostic async channel (replaces tokio::sync::mpsc).
+async-channel = "2"
 
-# Native: Use bevy-tokio-tasks for Tokio runtime (reqwest requires it).
+# Native: Additional Bevy features and Tokio runtime.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+bevy = { version = "0.18.0", default-features = false, features = [
+    "bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_winit",
+    "bevy_window", "bevy_asset", "bevy_mesh", "multi_threaded", "x11"
+] }
 bevy-tokio-tasks = "0.18"
 tokio = { version = "1", features = ["sync"] }
 tracing-subscriber = "0.3"
+
+# WASM: Panic hook and tracing for browser console.
+[target.'cfg(target_family = "wasm")'.dependencies]
+console_error_panic_hook = "0.1"
+tracing-wasm = "0.2"
+wasm-bindgen = "0.2"
 
 [lints]
 workspace = true

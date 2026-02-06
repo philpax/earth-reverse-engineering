@@ -3,14 +3,20 @@
 //! Bootstraps the initial planetoid and root bulk metadata. All node loading
 //! is handled by the LOD system in `lod.rs`.
 //!
-//! Uses platform-specific async runtimes:
+//! Uses platform-agnostic `async_channel` for communication between async tasks
+//! and the main thread. The spawn mechanism differs by platform:
 //! - Native: `bevy-tokio-tasks` for Tokio runtime (reqwest requires it)
 //! - WASM: Bevy's built-in `AsyncComputeTaskPool` (reqwest uses browser fetch)
 
-use bevy::prelude::*;
 use std::sync::Arc;
 
-use rocktree::{BulkMetadata, Client, MemoryCache, Planetoid};
+use bevy::prelude::*;
+#[cfg(target_family = "wasm")]
+use bevy::tasks::AsyncComputeTaskPool;
+#[cfg(not(target_family = "wasm"))]
+use bevy_tokio_tasks::TokioTasksRuntime;
+
+use rocktree::{BulkMetadata, BulkRequest, Client, MemoryCache, Planetoid};
 
 /// Plugin for loading Google Earth data.
 pub struct DataLoaderPlugin;
@@ -18,11 +24,9 @@ pub struct DataLoaderPlugin;
 impl Plugin for DataLoaderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LoaderState>()
-            .add_systems(Startup, start_initial_load);
-
-        // WASM: Add polling systems for task completion.
-        #[cfg(target_family = "wasm")]
-        app.add_systems(Update, (poll_planetoid_task, poll_bulk_task));
+            .init_resource::<LoaderChannels>()
+            .add_systems(Startup, start_initial_load)
+            .add_systems(Update, (poll_planetoid_task, poll_bulk_task));
     }
 }
 
@@ -47,201 +51,141 @@ impl Default for LoaderState {
     }
 }
 
-// =============================================================================
-// Native implementation using bevy-tokio-tasks
-// =============================================================================
+/// Channels for receiving loaded data from background tasks.
+#[derive(Resource)]
+pub struct LoaderChannels {
+    planetoid_rx: async_channel::Receiver<Result<Planetoid, rocktree::Error>>,
+    planetoid_tx: async_channel::Sender<Result<Planetoid, rocktree::Error>>,
+    bulk_rx: async_channel::Receiver<Result<BulkMetadata, rocktree::Error>>,
+    bulk_tx: async_channel::Sender<Result<BulkMetadata, rocktree::Error>>,
+}
 
-#[cfg(not(target_family = "wasm"))]
-mod native {
-    use bevy::prelude::*;
-    use bevy_tokio_tasks::{TaskContext, TokioTasksRuntime};
-    use std::sync::Arc;
+impl Default for LoaderChannels {
+    fn default() -> Self {
+        let (planetoid_tx, planetoid_rx) = async_channel::bounded(1);
+        let (bulk_tx, bulk_rx) = async_channel::bounded(1);
+        Self {
+            planetoid_rx,
+            planetoid_tx,
+            bulk_rx,
+            bulk_tx,
+        }
+    }
+}
 
-    use rocktree::{BulkRequest, Client, MemoryCache};
+/// Start loading the initial planetoid data.
+#[allow(clippy::needless_pass_by_value)]
+fn start_initial_load(
+    state: Res<LoaderState>,
+    channels: Res<LoaderChannels>,
+    #[cfg(not(target_family = "wasm"))] runtime: ResMut<TokioTasksRuntime>,
+) {
+    let client = Arc::clone(&state.client);
+    let tx = channels.planetoid_tx.clone();
 
-    use super::LoaderState;
-
-    /// Start loading the initial planetoid data (native).
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn start_initial_load(runtime: ResMut<TokioTasksRuntime>, state: Res<LoaderState>) {
-        let client = Arc::clone(&state.client);
-
-        runtime.spawn_background_task(|ctx| async move {
-            load_planetoid_and_bulk(ctx, client).await;
+    #[cfg(not(target_family = "wasm"))]
+    {
+        runtime.spawn_background_task(move |_ctx| async move {
+            let result = client.fetch_planetoid().await;
+            let _ = tx.send(result).await;
         });
-
-        tracing::info!("Started loading planetoid metadata");
     }
 
-    /// Background task that loads planetoid and root bulk metadata.
-    async fn load_planetoid_and_bulk(mut ctx: TaskContext, client: Arc<Client<MemoryCache>>) {
-        // Fetch planetoid metadata.
-        let planetoid = match client.fetch_planetoid().await {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!("Failed to load planetoid: {}", e);
-                return;
-            }
-        };
-
-        tracing::info!(
-            "Loaded planetoid: radius={:.0}m, root_epoch={}",
-            planetoid.radius,
-            planetoid.root_epoch
-        );
-
-        // Store planetoid in LoaderState.
-        let planetoid_clone = planetoid.clone();
-        ctx.run_on_main_thread(move |ctx| {
-            if let Some(mut state) = ctx.world.get_resource_mut::<LoaderState>() {
-                state.planetoid = Some(planetoid_clone);
-            }
-        })
-        .await;
-
-        // Fetch root bulk metadata.
-        let bulk_request = BulkRequest::root(planetoid.root_epoch);
-        let bulk = match client.fetch_bulk(&bulk_request).await {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::error!("Failed to load root bulk: {}", e);
-                return;
-            }
-        };
-
-        tracing::info!(
-            "Loaded root bulk: {} nodes, {} child bulks",
-            bulk.nodes.len(),
-            bulk.child_bulk_paths.len()
-        );
-
-        // Store bulk in LoaderState. The LOD system will handle node loading.
-        ctx.run_on_main_thread(move |ctx| {
-            if let Some(mut state) = ctx.world.get_resource_mut::<LoaderState>() {
-                state.root_bulk = Some(bulk);
-            }
-        })
-        .await;
-
-        tracing::info!("Metadata loading complete, LOD system will handle node loading");
+    #[cfg(target_family = "wasm")]
+    {
+        AsyncComputeTaskPool::get()
+            .spawn(async move {
+                let result = client.fetch_planetoid().await;
+                let _ = tx.send(result).await;
+            })
+            .detach();
     }
+
+    tracing::info!("Started loading planetoid metadata");
 }
 
-// =============================================================================
-// WASM implementation using Bevy's AsyncComputeTaskPool
-// =============================================================================
-
-#[cfg(target_family = "wasm")]
-mod wasm {
-    use bevy::prelude::*;
-    use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
-    use std::sync::Arc;
-
-    use rocktree::{BulkMetadata, BulkRequest, Planetoid};
-
-    use super::LoaderState;
-
-    /// Component for tracking async planetoid load task.
-    #[derive(Component)]
-    pub struct PlanetoidTask(pub Task<Result<Planetoid, rocktree::Error>>);
-
-    /// Component for tracking async bulk load task.
-    #[derive(Component)]
-    pub struct BulkTask {
-        pub task: Task<Result<BulkMetadata, rocktree::Error>>,
-        pub request: BulkRequest,
+/// Poll the planetoid loading task.
+#[allow(clippy::needless_pass_by_value)]
+fn poll_planetoid_task(
+    mut state: ResMut<LoaderState>,
+    channels: Res<LoaderChannels>,
+    #[cfg(not(target_family = "wasm"))] runtime: ResMut<TokioTasksRuntime>,
+) {
+    // Only poll if we haven't loaded the planetoid yet.
+    if state.planetoid.is_some() {
+        return;
     }
 
-    /// Start loading the initial planetoid data (WASM).
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn start_initial_load(mut commands: Commands, state: Res<LoaderState>) {
-        let client = Arc::clone(&state.client);
-        let task_pool = AsyncComputeTaskPool::get();
+    let Ok(result) = channels.planetoid_rx.try_recv() else {
+        return;
+    };
 
-        let task = task_pool.spawn(async move { client.fetch_planetoid().await });
+    match result {
+        Ok(planetoid) => {
+            tracing::info!(
+                "Loaded planetoid: radius={:.0}m, root_epoch={}",
+                planetoid.radius,
+                planetoid.root_epoch
+            );
 
-        commands.spawn(PlanetoidTask(task));
+            // Start loading root bulk.
+            let client = Arc::clone(&state.client);
+            let request = BulkRequest::root(planetoid.root_epoch);
+            let tx = channels.bulk_tx.clone();
 
-        tracing::info!("Started loading planetoid metadata");
-    }
-
-    /// Poll the planetoid loading task.
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn poll_planetoid_task(
-        mut commands: Commands,
-        mut state: ResMut<LoaderState>,
-        mut query: Query<(Entity, &mut PlanetoidTask)>,
-    ) {
-        for (entity, mut task) in &mut query {
-            if let Some(result) = block_on(future::poll_once(&mut task.0)) {
-                commands.entity(entity).despawn();
-
-                match result {
-                    Ok(planetoid) => {
-                        tracing::info!(
-                            "Loaded planetoid: radius={:.0}m, root_epoch={}",
-                            planetoid.radius,
-                            planetoid.root_epoch
-                        );
-
-                        // Start loading root bulk.
-                        let client = Arc::clone(&state.client);
-                        let epoch = planetoid.root_epoch;
-                        let request = BulkRequest::root(epoch);
-                        let req = request.clone();
-
-                        let task_pool = AsyncComputeTaskPool::get();
-                        let task = task_pool.spawn(async move { client.fetch_bulk(&req).await });
-
-                        commands.spawn(BulkTask { task, request });
-
-                        state.planetoid = Some(planetoid);
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to load planetoid: {}", e);
-                    }
-                }
+            #[cfg(not(target_family = "wasm"))]
+            {
+                runtime.spawn_background_task(move |_ctx| async move {
+                    let result = client.fetch_bulk(&request).await;
+                    let _ = tx.send(result).await;
+                });
             }
+
+            #[cfg(target_family = "wasm")]
+            {
+                AsyncComputeTaskPool::get()
+                    .spawn(async move {
+                        let result = client.fetch_bulk(&request).await;
+                        let _ = tx.send(result).await;
+                    })
+                    .detach();
+            }
+
+            state.planetoid = Some(planetoid);
         }
-    }
-
-    /// Poll bulk loading tasks.
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn poll_bulk_task(
-        mut commands: Commands,
-        mut state: ResMut<LoaderState>,
-        mut query: Query<(Entity, &mut BulkTask)>,
-    ) {
-        for (entity, mut task) in &mut query {
-            if let Some(result) = block_on(future::poll_once(&mut task.task)) {
-                commands.entity(entity).despawn();
-
-                match result {
-                    Ok(bulk) => {
-                        tracing::info!(
-                            "Loaded root bulk: {} nodes, {} child bulks",
-                            bulk.nodes.len(),
-                            bulk.child_bulk_paths.len()
-                        );
-
-                        // Store root bulk. The LOD system will handle node loading.
-                        state.root_bulk = Some(bulk);
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to load bulk '{}': {}", task.request.path, e);
-                    }
-                }
-            }
+        Err(e) => {
+            tracing::error!("Failed to load planetoid: {}", e);
         }
     }
 }
 
-// =============================================================================
-// Re-export the appropriate implementation
-// =============================================================================
+/// Poll bulk loading tasks.
+#[allow(clippy::needless_pass_by_value)]
+fn poll_bulk_task(mut state: ResMut<LoaderState>, channels: Res<LoaderChannels>) {
+    // Only poll if we haven't loaded the root bulk yet.
+    if state.root_bulk.is_some() {
+        return;
+    }
 
-#[cfg(not(target_family = "wasm"))]
-pub use native::start_initial_load;
+    let Ok(result) = channels.bulk_rx.try_recv() else {
+        return;
+    };
 
-#[cfg(target_family = "wasm")]
-pub use wasm::{poll_bulk_task, poll_planetoid_task, start_initial_load};
+    match result {
+        Ok(bulk) => {
+            tracing::info!(
+                "Loaded root bulk: {} nodes, {} child bulks",
+                bulk.nodes.len(),
+                bulk.child_bulk_paths.len()
+            );
+
+            // Store root bulk. The LOD system will handle node loading.
+            state.root_bulk = Some(bulk);
+
+            tracing::info!("Metadata loading complete, LOD system will handle node loading");
+        }
+        Err(e) => {
+            tracing::error!("Failed to load root bulk: {}", e);
+        }
+    }
+}
