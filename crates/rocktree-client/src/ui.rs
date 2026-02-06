@@ -6,7 +6,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
-use crate::camera::CameraSettings;
+use crate::camera::{CameraSettings, MAX_SPEED, MIN_SPEED};
 use crate::floating_origin::FloatingOriginCamera;
 use crate::lod::LodState;
 use crate::mesh::RocktreeMeshMarker;
@@ -27,7 +27,7 @@ impl Plugin for DebugUiPlugin {
 fn debug_ui_system(
     mut contexts: EguiContexts,
     diagnostics: Res<DiagnosticsStore>,
-    settings: Res<CameraSettings>,
+    mut settings: ResMut<CameraSettings>,
     lod_state: Res<LodState>,
     camera_query: Query<&FloatingOriginCamera>,
     mesh_query: Query<&RocktreeMeshMarker>,
@@ -79,11 +79,28 @@ fn debug_ui_system(
                 "Nodes: {loaded_nodes} loaded, {loading_nodes} loading"
             ));
             ui.label(format!("Meshes: {mesh_count}"));
+
             ui.separator();
+
+            // Speed slider.
+            ui.horizontal(|ui| {
+                ui.label("Speed:");
+                ui.add(
+                    egui::Slider::new(&mut settings.base_speed, MIN_SPEED..=MAX_SPEED)
+                        .logarithmic(true)
+                        .suffix(" m/s"),
+                );
+            });
+
+            ui.separator();
+
             ui.label("Controls:");
-            ui.label("  WASD - Move");
-            ui.label("  Mouse - Look");
+            ui.label("  WASD - Move horizontally");
+            ui.label("  Space/Ctrl - Ascend/Descend");
+            ui.label("  Mouse - Look (when grabbed)");
             ui.label("  Shift - Speed boost");
+            ui.label("  ESC - Release cursor");
+            ui.label("  Click - Grab cursor");
         });
 
     Ok(())
