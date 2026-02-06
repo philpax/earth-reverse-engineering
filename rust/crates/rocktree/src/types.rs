@@ -3,6 +3,8 @@
 //! These types represent the decoded and processed data from Google Earth's
 //! rocktree format, ready for rendering.
 
+use std::collections::HashMap;
+
 use glam::{DMat4, DVec3, Vec3};
 use rocktree_decode::{OrientedBoundingBox, UvTransform, Vertex};
 
@@ -34,6 +36,10 @@ pub struct Mesh {
     pub texture_width: u32,
     /// Texture height in pixels.
     pub texture_height: u32,
+    /// Whether per-vertex octant data (`Vertex::w`) was populated from the protobuf.
+    /// When false, all vertices have `w = 0` and per-vertex octant masking should
+    /// not be applied (it would incorrectly collapse all vertices).
+    pub has_octant_data: bool,
 }
 
 /// A decoded node containing one or more meshes.
@@ -81,8 +87,8 @@ pub struct BulkMetadata {
     pub meters_per_texel: Vec<f32>,
     /// Node metadata within this bulk.
     pub nodes: Vec<NodeMetadata>,
-    /// Paths to child bulks (4-character paths relative to this bulk).
-    pub child_bulk_paths: Vec<String>,
+    /// Child bulk paths (4-character relative paths) mapped to their epochs.
+    pub child_bulk_paths: HashMap<String, u32>,
     /// Epoch for this bulk's metadata.
     pub epoch: u32,
 }
@@ -256,7 +262,7 @@ impl LodMetrics {
         Self {
             camera_position,
             pixels_per_meter,
-            error_threshold: 2.0, // Default: 2 pixels of error.
+            error_threshold: 0.6, // Tuned to match C++ refine aggressiveness.
         }
     }
 

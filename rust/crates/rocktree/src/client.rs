@@ -267,7 +267,7 @@ impl<C: Cache> Client<C> {
         let default_imagery_epoch = proto.default_imagery_epoch;
 
         let mut nodes = Vec::new();
-        let mut child_bulk_paths = Vec::new();
+        let mut child_bulk_paths = std::collections::HashMap::new();
 
         for node_meta in &proto.node_metadata {
             let path_and_flags = node_meta.path_and_flags.unwrap_or(0);
@@ -282,9 +282,7 @@ impl<C: Cache> Client<C> {
             // Check for child bulk (4-char paths that aren't leaves).
             if pf.path.len() == 4 && !is_leaf {
                 let epoch = node_meta.bulk_metadata_epoch.unwrap_or(head_epoch);
-                child_bulk_paths.push(pf.path.clone());
-                // Store epoch info separately if needed.
-                let _ = epoch; // Epoch is used when creating BulkRequest for child.
+                child_bulk_paths.insert(pf.path.clone(), epoch);
             }
 
             // Skip nodes without OBB if they have data or aren't leaves.
@@ -413,8 +411,9 @@ impl<C: Cache> Client<C> {
 
         // Unpack octant masks and get layer bounds.
         let octant_data = proto.layer_and_octant_counts.as_deref().unwrap_or(&[]);
-        let layer_bounds = if !octant_data.is_empty() && !indices.is_empty() && !vertices.is_empty()
-        {
+        let has_octant_data =
+            !octant_data.is_empty() && !indices.is_empty() && !vertices.is_empty();
+        let layer_bounds = if has_octant_data {
             rocktree_decode::unpack_octant_mask_and_layer_bounds(
                 octant_data,
                 &indices,
@@ -440,6 +439,7 @@ impl<C: Cache> Client<C> {
             texture_format,
             texture_width,
             texture_height,
+            has_octant_data,
         })
     }
 
