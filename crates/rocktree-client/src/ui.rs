@@ -95,10 +95,11 @@ fn debug_ui_system(
             ui.separator();
 
             ui.label("Controls:");
-            ui.label("  WASD - Move horizontally");
+            ui.label("  WASD - Move in view direction");
             ui.label("  Space/Ctrl - Ascend/Descend");
-            ui.label("  Mouse - Look (when grabbed)");
+            ui.label("  Mouse - Look around");
             ui.label("  Shift - Speed boost");
+            ui.label("  Scroll - Adjust speed");
             ui.label("  ESC - Release cursor");
             ui.label("  Click - Grab cursor");
         });

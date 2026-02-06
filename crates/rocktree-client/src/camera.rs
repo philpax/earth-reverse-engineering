@@ -169,32 +169,38 @@ fn camera_look(
     }
 
     for (origin_camera, mut transform, mut camera) in &mut query {
-        let yaw = delta.x * settings.mouse_sensitivity;
+        let yaw = -delta.x * settings.mouse_sensitivity;
         let pitch = -delta.y * settings.mouse_sensitivity;
 
         // Calculate up vector (from Earth center towards camera) using high-precision position.
         let up = origin_camera.position.normalize().as_vec3();
 
-        // Prevent looking straight up or down.
-        let overhead = camera.direction.dot(-up);
-        let pitch = if (overhead > 0.99 && pitch < 0.0) || (overhead < -0.99 && pitch > 0.0) {
-            0.0
-        } else {
-            pitch
-        };
+        // Calculate the right vector (horizontal, perpendicular to view direction and up).
+        let right = camera.direction.cross(up);
 
-        // Calculate rotation axes.
-        let pitch_axis = camera.direction.cross(up).normalize();
-        let yaw_axis = camera.direction.cross(pitch_axis).normalize();
+        // Handle degenerate case when looking straight up or down.
+        if right.length_squared() < 1e-6 {
+            continue;
+        }
+        let right = right.normalize();
 
-        // Apply rotations.
-        let yaw_rotation = Quat::from_axis_angle(yaw_axis, yaw);
-        let pitch_rotation = Quat::from_axis_angle(pitch_axis, pitch);
+        // Clamp pitch to prevent flipping over the poles.
+        let current_pitch = camera.direction.dot(-up);
+        let pitch =
+            if (current_pitch > 0.99 && pitch < 0.0) || (current_pitch < -0.99 && pitch > 0.0) {
+                0.0
+            } else {
+                pitch
+            };
 
+        // Yaw rotates around local up (Earth radial), pitch rotates around local right.
+        let yaw_rotation = Quat::from_axis_angle(up, yaw);
+        let pitch_rotation = Quat::from_axis_angle(right, pitch);
+
+        // Apply yaw first, then pitch.
         camera.direction = (yaw_rotation * pitch_rotation * camera.direction).normalize();
 
         // Update transform to look in the new direction.
-        // Camera stays at origin; only rotation changes.
         transform.look_to(camera.direction, up);
     }
 }
@@ -205,9 +211,9 @@ fn camera_movement(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     settings: Res<CameraSettings>,
-    mut query: Query<(&mut FloatingOriginCamera, &FlightCamera)>,
+    mut query: Query<(&mut FloatingOriginCamera, &mut Transform, &mut FlightCamera)>,
 ) {
-    for (mut origin_camera, camera) in &mut query {
+    for (mut origin_camera, mut transform, mut camera) in &mut query {
         // Calculate altitude-based speed using high-precision position.
         let altitude = origin_camera.position.length() - settings.earth_radius;
         let altitude = altitude.max(0.0);
@@ -222,9 +228,9 @@ fn camera_movement(
         }
 
         // Calculate movement directions using high-precision up vector.
-        let up = origin_camera.position.normalize().as_vec3();
+        let old_up = origin_camera.position.normalize().as_vec3();
         let forward = camera.direction;
-        let right = forward.cross(up).normalize();
+        let right = forward.cross(old_up).normalize();
 
         // Accumulate movement.
         let mut movement = Vec3::ZERO;
@@ -247,10 +253,10 @@ fn camera_movement(
 
         // Ascend/descend.
         if keyboard.pressed(KeyCode::Space) {
-            movement += up;
+            movement += old_up;
         }
         if keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight) {
-            movement -= up;
+            movement -= old_up;
         }
 
         if movement != Vec3::ZERO {
@@ -262,13 +268,24 @@ fn camera_movement(
                 f64::from(movement.y),
                 f64::from(movement.z),
             );
-            let new_position = origin_camera.position + movement_dvec;
-            let new_altitude = new_position.length() - settings.earth_radius;
+            let mut new_position = origin_camera.position + movement_dvec;
 
-            // Prevent going too far from Earth or below surface.
-            if new_altitude < 10_000_000.0 && new_altitude > -100.0 {
-                origin_camera.position = new_position;
-            }
+            // Clamp altitude to valid range while preserving lateral movement.
+            let min_radius = settings.earth_radius - 100.0;
+            let max_radius = settings.earth_radius + 10_000_000.0;
+            let new_radius = new_position.length().clamp(min_radius, max_radius);
+            new_position = new_position.normalize() * new_radius;
+
+            origin_camera.position = new_position;
+
+            // Parallel transport: rotate the direction to account for the change in local up.
+            // This prevents the camera from "straightening out" as we move around the sphere.
+            let new_up = new_position.normalize().as_vec3();
+            let rotation = Quat::from_rotation_arc(old_up, new_up);
+            camera.direction = (rotation * camera.direction).normalize();
+
+            // Update transform to match.
+            transform.look_to(camera.direction, new_up);
         }
     }
 }
