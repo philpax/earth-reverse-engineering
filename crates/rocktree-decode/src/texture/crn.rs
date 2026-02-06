@@ -56,20 +56,20 @@ pub fn decode_crn_to_rgba(data: &[u8]) -> DecodeResult<DecodedTexture> {
         },
     )?;
 
-    // Convert u32 RGBA to byte array.
-    // texture2ddecoder outputs RGBA as u32 in native byte order.
-    let rgba_bytes = rgba_u32_to_bytes(rgba_u32);
+    // Convert BGRA u32 to RGBA byte array.
+    let rgba_bytes = bgra_u32_to_rgba_bytes(rgba_u32);
 
     Ok(DecodedTexture::new(rgba_bytes, width, height))
 }
 
-/// Convert packed RGBA u32 values to byte array.
-fn rgba_u32_to_bytes(data: Vec<u32>) -> Vec<u8> {
+/// Convert packed BGRA u32 values to RGBA byte array.
+fn bgra_u32_to_rgba_bytes(data: Vec<u32>) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(data.len() * 4);
     for pixel in data {
-        // texture2ddecoder packs as ABGR in little-endian,
-        // which reads as RGBA when interpreted as bytes.
-        bytes.extend_from_slice(&pixel.to_le_bytes());
+        // texture2ddecoder outputs BGRA32: u32 is 0xAARRGGBB (A high, B low).
+        // to_le_bytes() gives [B, G, R, A], so we swap R and B for RGBA.
+        let [b, g, r, a] = pixel.to_le_bytes();
+        bytes.extend_from_slice(&[r, g, b, a]);
     }
     bytes
 }
@@ -87,13 +87,15 @@ mod tests {
     }
 
     #[test]
-    fn test_rgba_u32_to_bytes() {
+    fn test_bgra_u32_to_rgba_bytes() {
+        // BGRA32: 0xAARRGGBB -> to_le_bytes gives [B, G, R, A] -> output [R, G, B, A].
         let input = vec![0x11223344u32, 0xAABBCCDDu32];
-        let bytes = rgba_u32_to_bytes(input);
+        let bytes = bgra_u32_to_rgba_bytes(input);
 
-        // Little-endian: 0x11223344 -> [0x44, 0x33, 0x22, 0x11].
+        // 0x11223344: A=0x11, R=0x22, G=0x33, B=0x44 -> RGBA = [0x22, 0x33, 0x44, 0x11].
+        // 0xAABBCCDD: A=0xAA, R=0xBB, G=0xCC, B=0xDD -> RGBA = [0xBB, 0xCC, 0xDD, 0xAA].
         assert_eq!(bytes.len(), 8);
-        assert_eq!(&bytes[0..4], &[0x44, 0x33, 0x22, 0x11]);
-        assert_eq!(&bytes[4..8], &[0xDD, 0xCC, 0xBB, 0xAA]);
+        assert_eq!(&bytes[0..4], &[0x22, 0x33, 0x44, 0x11]);
+        assert_eq!(&bytes[4..8], &[0xBB, 0xCC, 0xDD, 0xAA]);
     }
 }
