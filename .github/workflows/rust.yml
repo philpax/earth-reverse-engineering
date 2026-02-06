@@ -4,20 +4,16 @@ on:
   push:
     branches: [master]
     paths:
-      - 'rust/**'
+      - '**'
       - '.github/workflows/rust.yml'
   pull_request:
     branches: [master]
     paths:
-      - 'rust/**'
+      - '**'
       - '.github/workflows/rust.yml'
 
 env:
   CARGO_TERM_COLOR: always
-
-defaults:
-  run:
-    working-directory: rust
 
 jobs:
   check:
@@ -37,8 +33,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/**/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -69,8 +65,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('rust/**/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests
         run: cargo test --workspace
@@ -95,8 +91,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('rust/**/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check rocktree-proto (WASM)
         run: cargo check --target wasm32-unknown-unknown -p rocktree-proto
