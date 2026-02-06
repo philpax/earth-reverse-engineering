@@ -1,6 +1,6 @@
 # Rust rocktree implementation
 
-A Rust rewrite of the Google Earth mesh retrieval system, featuring:
+A Rust rewrite of [earth-reverse-engineering](https://github.com/retroplasma/earth-reverse-engineering), featuring:
 
 - A modular library for mesh retrieval and decoding
 - A Bevy-based 3D viewer client
