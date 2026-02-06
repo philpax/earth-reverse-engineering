@@ -44,8 +44,9 @@ pub struct UnlitMaterial {
     #[sampler(1)]
     pub base_color_texture: Handle<Image>,
     /// Bitmask of octants to hide (bit `i` set = octant `i` has a loaded child).
+    /// Stored in `.x`; padded to 16 bytes for WebGL compatibility.
     #[uniform(2)]
-    pub octant_mask: u32,
+    pub octant_mask: UVec4,
 }
 
 impl Material for UnlitMaterial {

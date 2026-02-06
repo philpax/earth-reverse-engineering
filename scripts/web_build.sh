@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
-cargo build --release -p rocktree-client --target wasm32-unknown-unknown --no-default-features --features webgpu
+cargo build --release -p rocktree-client --target wasm32-unknown-unknown --no-default-features
 wasm-bindgen \
     --no-typescript \
     --target web \

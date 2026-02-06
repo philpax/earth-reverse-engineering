@@ -6,7 +6,8 @@
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var base_color_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> octant_mask: u32;
+// Padded to vec4 for WebGL 16-byte uniform alignment.
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> octant_mask: vec4<u32>;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -19,7 +20,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // origin so the triangle degenerates and is not rasterized.
     // Vertices with octant >= 8 (e.g. sentinel value 255) are never masked.
     let octant = u32(vertex.color.r + 0.5);
-    let is_masked = (octant_mask >> octant) & 1u;
+    let is_masked = (octant_mask.x >> octant) & 1u;
     let mask = select(1.0, 0.0, is_masked != 0u);
 
     out.world_position = mesh_functions::mesh_position_local_to_world(

@@ -526,7 +526,7 @@ fn poll_lod_node_tasks(
 
                     let material = materials.add(UnlitMaterial {
                         base_color_texture: texture_handle,
-                        octant_mask: 0,
+                        octant_mask: UVec4::ZERO,
                     });
 
                     let (world_position, transform) =
@@ -616,9 +616,9 @@ fn cull_meshes(
         // material every frame (get_mut marks the asset as modified).
         let needs_update = materials
             .get(&material_handle.0)
-            .is_some_and(|m| m.octant_mask != u32::from(mask));
+            .is_some_and(|m| m.octant_mask.x != u32::from(mask));
         if needs_update && let Some(material) = materials.get_mut(&material_handle.0) {
-            material.octant_mask = u32::from(mask);
+            material.octant_mask.x = u32::from(mask);
         }
     }
 }
